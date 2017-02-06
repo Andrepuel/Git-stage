@@ -1,7 +1,7 @@
-#!/bin/sh
+#!/bin/bash
 
 # Initial checking ------------------------------------------------------------------
-if [ ! -d .git ]; then
+if [ ! -e .git ]; then
 	echo "Not in then root of a git repository" 1>&2
 	exit 1
 fi
@@ -11,6 +11,23 @@ if [ $? -gt 0 ]; then
 	exit 1
 fi
 differ=`git config diff.tool`
+git config difftool.$differ.cmd > /dev/null
+if [ $? -gt 0 ]; then
+    differ="$differ \$LOCAL \$REMOTE"
+else
+    differ="`git config difftool.$differ.cmd`"
+fi
+LOCAL=local
+REMOTE=remote
+function getDiffer {
+    echo "Do you want to diff $LOCAL and $REMOTE? [y/n]" >&2
+    read answer
+    if [ "$answer"es = 'yes' -o "$answer"es == 'es' ]; then
+        echo $differ | sed 's,$LOCAL,"'$LOCAL'",g' | sed 's,$REMOTE,"'$REMOTE'",g'
+    else
+        echo echo
+    fi
+}
 
 # Options ---------------------------------------------------------------------------
 
@@ -30,22 +47,26 @@ for eachFile in `git status --short | cut -c 4-`; do
 		echo "Directory is not supported yet, ignoring $eachFile" 1>&2
 		continue
 	fi
-	repoFile=`mktemp`
-	stageFile=`mktemp`
+	repoFile=`mktemp /tmp/XXXXX`
+	stageFile=`mktemp /tmp/XXXXX`
 
 	if [ `echo $eachFile | cut -c 1` == '"' ]; then
 		eachFile=$(echo $eachFile | cut -c 2-$(($(echo $eachFile | wc -c)-2)))
 	fi
 
 	touch $repoFile
-	git show "HEAD:$eachFile" > $repoFile 2>/dev/null
+	git show "HEAD:$eachFile" > $repoFile 
 	cp $repoFile $stageFile
 	git diff --staged "$eachFile" | patch -f $stageFile
 
 	if [ $three_way_diff ]; then
-		$differ $repoFile "$eachFile" $stageFile
+        LOCAL=$repoFile
+        REMOTE="$eachFile"
+        echo `getDiffer` $stageFile | /bin/bash
 	else
-		$differ "$eachFile" $stageFile
+        LOCAL="$eachFile"
+        REMOTE=$stageFile
+        echo `getDiffer` | /bin/bash
 	fi
 
 	if [ `diff $repoFile $stageFile | wc -l` -eq 0 ]; then
